@@ -82,8 +82,9 @@ def ncf_collaborative_filtering(user_id, top_n=5):
         recommendations.update(history)
     recommendations -= set(user_history)
     recommended_articles = news_df[news_df['article_id'].isin(recommendations)]
+    recommended_articles = recommended_articles[['article_id', 'title']].copy()
     recommended_articles['collab_score'] = 1
-    return recommended_articles[['article_id', 'title', 'collab_score']].head(top_n)
+    return recommended_articles
 
 # Freshness, Sentiment, Popularity Weighting
 def compute_freshness(publish_date, current_date=datetime.now()):
@@ -100,10 +101,22 @@ def recommend_articles(user_id, content_weight=0.4, collab_weight=0.25, freshnes
     content_recs = get_content_recommendations(user_interests, top_n=top_n * 2)
     collab_recs = ncf_collaborative_filtering(user_id, top_n=top_n * 2)
 
+    # Convert content and collaborative recommendations to DataFrames to ensure columns align during merging
+    content_recs = content_recs[['article_id', 'content_score']].copy()
+    collab_recs = collab_recs[['article_id', 'collab_score']].copy()
+
     # Merge recommendations
     all_recs = pd.merge(content_recs, collab_recs, on='article_id', how='outer').fillna(0)
-    all_recs = pd.merge(all_recs, news_df[['article_id', 'freshness_score', 'popularity_score', 'sentiment_score']], on='article_id', how='left')
-    
+
+    # Add additional scores from news_df
+    all_recs = pd.merge(
+        all_recs,
+        news_df[['article_id', 'title', 'freshness_score', 'popularity_score', 'sentiment_score']].copy(),
+        on='article_id',
+        how='left'
+    )
+
+    # Calculate the final score with the weighted sum
     all_recs['final_score'] = (
         all_recs['content_score'] * content_weight +
         all_recs['collab_score'] * collab_weight +
@@ -111,10 +124,13 @@ def recommend_articles(user_id, content_weight=0.4, collab_weight=0.25, freshnes
         all_recs['popularity_score'] * popularity_weight +
         all_recs['sentiment_score'] * sentiment_weight
     )
+
+    # Sort by the final score and select the top N articles
     final_recs = all_recs.sort_values(by='final_score', ascending=False).head(top_n)
     
     print(f"Recommended Articles for User {user_id}:")
     print(final_recs[['article_id', 'title', 'final_score']])
+    
     return final_recs  # Return the recommendations for evaluation
 
 # Evaluation
@@ -137,3 +153,4 @@ relevancy_scores = {
 # Evaluate the recommendations based on the relevancy scores
 evaluation = evaluate_recommendations(user_id=1, recommended_articles=recommended_articles, relevancy_scores=relevancy_scores)
 print(f"Evaluation Metrics for User 1: Precision: {evaluation['precision']:.2f}, Recall: {evaluation['recall']:.2f}, F1 Score: {evaluation['f1_score']:.2f}")
+
